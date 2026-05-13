@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Big Jack | Command Center</title>
+    <link rel="stylesheet" href="http://localhost:3000/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <script src="http://localhost:3000/socket.io/socket.io.js"></script>
+</head>
+
+
+<body class="dark-mode">
+    <div class="glass-container">
+        <header>
+            <div class="logo-area">
+                <h1>BIG <span>JACK</span></h1>
+                <p>Bot Control Center</p>
+            </div>
+            <div id="bot-status-badge" class="status-badge starting">
+                <span class="dot"></span>
+                <span class="text">Iniciando...</span>
+            </div>
+        </header>
+
+        <main>
+            <section class="chats-sidebar">
+                <div class="card chats-card">
+                    <h2>Chats Activos</h2>
+                    <div id="chats-list" class="chats-list">
+                        <div class="empty-state">No hay actividad reciente.</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="center-panel">
+                <div class="card settings-card">
+                    <h2>Configuración de IA</h2>
+                    <div class="selector-group">
+                        <label>Proveedor de IA</label>
+                        <select id="ai-selector" onchange="setProvider(this.value)">
+                            <option value="gemini">Google Gemini (Cloud)</option>
+                            <option value="ollama">Ollama (Local)</option>
+                        </select>
+                    </div>
+                    <div class="metrics">
+                        <div class="metric">
+                            <label>Memoria de Contexto</label>
+                            <div class="progress-bar">
+                                <div id="token-progress" class="fill" style="width: 15%;"></div>
+                            </div>
+                            <span id="token-text">15% Uso</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card qr-card" id="qr-container">
+                    <h2>Conexión</h2>
+                    <div id="qr-placeholder" class="qr-content">
+                        <p>Iniciando...</p>
+                    </div>
+                    <div id="qr-image-container" style="display: none;">
+                        <canvas id="qr-canvas"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <section class="orders-panel">
+                <div class="card history-card">
+                    <div class="card-header">
+                        <h2>Pedidos</h2>
+                        <span id="order-count" class="badge">0</span>
+                    </div>
+                    <div id="orders-list" class="orders-list">
+                        <div class="empty-state">Sin pedidos.</div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Sonido de notificación -->
+    <audio id="notif-sound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"
+        preload="auto"></audio>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>

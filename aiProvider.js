@@ -6,13 +6,16 @@ class AIProvider {
     constructor() {
         this.provider = config.ai.provider;
         this.geminiApiKey = config.ai.gemini.apiKey;
-        this.geminiModels = config.ai.gemini.models;
-        this.ollamaUrl = config.ai.ollama.url;
-        this.ollamaModel = config.ai.ollama.model;
+        this.activeModel = this.provider === 'ollama' ? config.ai.ollama.model : config.ai.gemini.models[0];
         
         if (this.geminiApiKey) {
             this.genAI = new GoogleGenerativeAI(this.geminiApiKey);
         }
+    }
+
+    setSettings(provider, model) {
+        if (provider) this.provider = provider;
+        if (model) this.activeModel = model;
     }
 
     async sendMessage(history, userMessage, systemInstruction) {
@@ -24,25 +27,19 @@ class AIProvider {
     }
 
     async sendGeminiMessage(history, userMessage, systemInstruction) {
-        let lastError;
-        for (const modelName of this.geminiModels) {
-            try {
-                const model = this.genAI.getGenerativeModel({
-                    model: modelName.trim(),
-                    systemInstruction: systemInstruction
-                });
+        try {
+            const model = this.genAI.getGenerativeModel({
+                model: this.activeModel.trim(),
+                systemInstruction: systemInstruction
+            });
 
-                const chatSession = model.startChat({ history });
-                const result = await chatSession.sendMessage(userMessage);
-                return result.response.text();
-            } catch (error) {
-                lastError = error;
-                console.warn(`⚠️ Error con Gemini (${modelName}):`, error.message);
-                if (error.status === 404) continue;
-                throw error;
-            }
+            const chatSession = model.startChat({ history });
+            const result = await chatSession.sendMessage(userMessage);
+            return result.response.text();
+        } catch (error) {
+            console.error(`❌ Error con Gemini (${this.activeModel}):`, error.message);
+            throw error;
         }
-        throw lastError || new Error('No se pudo obtener respuesta de Gemini');
     }
 
     async sendOllamaMessage(history, userMessage, systemInstruction) {
@@ -56,8 +53,8 @@ class AIProvider {
                 { role: 'user', content: userMessage }
             ];
 
-            const response = await axios.post(this.ollamaUrl, {
-                model: this.ollamaModel,
+            const response = await axios.post(config.ai.ollama.url, {
+                model: this.activeModel,
                 messages: messages,
                 stream: false,
                 options: { temperature: 0.7 }
@@ -65,11 +62,12 @@ class AIProvider {
 
             return response.data.message.content;
         } catch (error) {
-            console.error('❌ Error con Ollama:', error.message);
-            throw new Error('Ollama no está disponible o respondió con error.');
+            console.error(`❌ Error con Ollama (${this.activeModel}):`, error.message);
+            throw new Error('Ollama no está disponible o el modelo no existe.');
         }
     }
 }
+
 
 module.exports = new AIProvider();
 
