@@ -43,36 +43,62 @@ header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 40px;
+    margin-bottom: 24px;
     border-bottom: 1px solid var(--glass-border);
     padding-bottom: 20px;
 }
 
-.logo-area h1 {
-    font-size: 2rem;
-    font-weight: 800;
-    letter-spacing: -1px;
+.header-actions { display: flex; gap: 12px; align-items: center; }
+
+.mini-btn {
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.05);
+    color: white;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.2s;
 }
 
-.logo-area h1 span {
-    color: var(--accent-orange);
+.mini-btn.danger { background: rgba(239, 68, 68, 0.1); color: #ef4444; border-color: #ef444455; }
+.mini-btn.danger:hover { background: #ef4444; color: white; }
+
+.stats-overview {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
 }
 
-.logo-area p {
-    color: var(--text-secondary);
-    font-size: 0.9rem;
-}
-
-.status-badge {
+.stat-card {
+    background: rgba(15, 23, 42, 0.3);
+    border: 1px solid var(--glass-border);
+    padding: 16px;
+    border-radius: 16px;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 8px;
-    padding: 8px 16px;
-    border-radius: 50px;
-    background: rgba(0, 0, 0, 0.2);
-    font-size: 0.85rem;
-    font-weight: 600;
 }
+
+.stat-card .val { font-size: 1.5rem; font-weight: 800; color: var(--accent-teal); }
+.stat-card .lbl { font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; margin-top: 4px; }
+
+/* Toggle Switch */
+.toggle-switch { position: relative; width: 44px; height: 24px; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.switch-label {
+    position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+    background-color: rgba(255, 255, 255, 0.1); transition: .4s; border-radius: 34px;
+}
+.switch-label:before {
+    position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px;
+    background-color: white; transition: .4s; border-radius: 50%;
+}
+input:checked + .switch-label { background-color: var(--accent-teal); }
+input:checked + .switch-label:before { transform: translateX(20px); }
+
+.chat-actions { display: flex; gap: 6px; margin-top: 8px; }
 
 .status-badge .dot {
     width: 8px;

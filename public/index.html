@@ -16,44 +16,67 @@
         <header>
             <div class="logo-area">
                 <h1>BIG <span>JACK</span></h1>
-                <p>Bot Control Center</p>
+                <p>Enterprise Control Panel</p>
             </div>
-            <div id="bot-status-badge" class="status-badge starting">
-                <span class="dot"></span>
-                <span class="text">Iniciando...</span>
+            <div class="header-actions">
+                <div id="bot-status-badge" class="status-badge starting">
+                    <span class="dot"></span>
+                    <span class="text">Iniciando...</span>
+                </div>
+                <button id="logout-btn" class="mini-btn danger" onclick="logout()" title="Cerrar Sesión">🚪</button>
             </div>
         </header>
+
+        <section class="stats-overview">
+            <div class="stat-card">
+                <span class="val" id="stat-orders">0</span>
+                <span class="lbl">Pedidos Hoy</span>
+            </div>
+            <div class="stat-card">
+                <span class="val" id="stat-msgs">0</span>
+                <span class="lbl">Msgs Procesados</span>
+            </div>
+            <div class="stat-card">
+                <span class="val" id="stat-success">0</span>
+                <span class="lbl">ERP Exitos</span>
+            </div>
+        </section>
 
         <main>
             <section class="chats-sidebar">
                 <div class="card chats-card">
                     <h2>Chats Activos</h2>
                     <div id="chats-list" class="chats-list">
-                        <div class="empty-state">No hay actividad reciente.</div>
+                        <div class="empty-state">Sin actividad.</div>
                     </div>
                 </div>
             </section>
 
             <section class="center-panel">
                 <div class="card settings-card">
-                    <h2>Configuración de IA</h2>
-                    <div class="selector-group">
-                        <label>Proveedor de IA</label>
-                        <select id="ai-selector" onchange="setProvider(this.value)">
-                            <option value="gemini">Google Gemini (Cloud)</option>
-                            <option value="ollama">Ollama (Local)</option>
-                        </select>
+                    <div class="card-header">
+                        <h2>Control Maestro</h2>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="global-bot-toggle" onchange="toggleGlobalBot(this.checked)" checked>
+                            <label for="global-bot-toggle" class="switch-label"></label>
+                        </div>
                     </div>
+                    
+                    <div class="selector-group">
+                        <label>Motor de Inteligencia</label>
+                        <select id="ai-selector" onchange="setProvider(this.value)"></select>
+                    </div>
+                    
                     <div class="metrics">
                         <div class="metric">
-                            <label>Memoria de Contexto</label>
+                            <label>Contexto IA</label>
                             <div class="progress-bar">
-                                <div id="token-progress" class="fill" style="width: 15%;"></div>
+                                <div id="token-progress" class="fill" style="width: 25%;"></div>
                             </div>
-                            <span id="token-text">15% Uso</span>
                         </div>
                     </div>
                 </div>
+
 
                 <div class="card qr-card" id="qr-container">
                     <h2>Conexión</h2>

@@ -37,31 +37,53 @@ try {
     sessionDataDir = config.whatsapp.sessionPath || path.join(__dirname, '.wwebjs_auth');
 }
 
-// Estado del bot y pedidos
+// Estado global empresarial
+let botEnabled = true;
 const chatHistories = {}; 
 const ordersHistory = [];
-const activeChats = {}; // { chatId: { phone, lastMessage, status, timestamp } }
+const activeChats = {}; // { chatId: { phone, lastMessage, status, timestamp, botPaused } }
+const stats = { ordersToday: 0, messagesProcessed: 0, erpSuccess: 0 };
 let botStatus = 'starting';
 
 // API Endpoints
 app.get('/api/status', (req, res) => {
     res.json({
         status: botStatus,
+        botEnabled,
         provider: aiProvider.provider,
         model: aiProvider.activeModel,
-        ollama: config.ai.ollama,
-        gemini: { models: config.ai.gemini.models }
+        stats
     });
 });
 
+app.post('/api/control', (req, res) => {
+    const { action, chatId, value } = req.body;
+    
+    if (action === 'toggle-global') {
+        botEnabled = value;
+        io.emit('status-update', { botEnabled });
+    } else if (action === 'toggle-chat' && chatId) {
+        if (activeChats[chatId]) {
+            activeChats[chatId].botPaused = value;
+            io.emit('chat-update', activeChats[chatId]);
+        }
+    }
+    res.json({ success: true });
+});
 
-app.get('/api/orders', (req, res) => {
-    res.json(ordersHistory.slice(-50).reverse());
+app.post('/api/logout', async (req, res) => {
+    try {
+        await client.logout();
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 app.get('/api/chats', (req, res) => {
     res.json(Object.values(activeChats).sort((a, b) => b.timestamp - a.timestamp));
 });
+
 
 app.get('/api/models', async (req, res) => {
     let ollamaModels = [];
@@ -114,16 +136,25 @@ client.on('message', async (message) => {
     if (message.from.includes('@g.us') || message.from === 'status@broadcast') return;
 
     const chatId = message.from;
+    const isPaused = activeChats[chatId]?.botPaused;
     
+    // Increment message count
+    stats.messagesProcessed++;
+    io.emit('stats-update', stats);
+
     // Update active chats
     activeChats[chatId] = {
         id: chatId,
         phone: normalizePhone(chatId),
         lastMessage: message.body.substring(0, 50),
         status: activeChats[chatId]?.status || 'pending',
+        botPaused: isPaused || false,
         timestamp: Date.now()
     };
     io.emit('chat-update', activeChats[chatId]);
+
+    // Si el bot está apagado globalmente o para este chat, no responder
+    if (!botEnabled || isPaused) return;
 
     if (!chatHistories[chatId]) chatHistories[chatId] = [];
 
@@ -135,19 +166,23 @@ client.on('message', async (message) => {
 
         chatHistories[chatId].push({ role: "user", parts: [{ text: message.body }] });
 
+        // Procesar JSON y limpiar respuesta para el cliente
         const orderMatch = aiResponse.match(/<ORDER_JSON>([\s\S]*?)<\/ORDER_JSON>/);
         let replyText = aiResponse;
 
         if (orderMatch) {
-            replyText = aiResponse.replace(/<ORDER_JSON>[\s\S]*?<\/ORDER_JSON>/, '').trim();
-            
+            // Extraer JSON
             try {
-                const rawOrderData = JSON.parse(orderMatch[1]);
+                const rawOrderData = JSON.parse(orderMatch[1].trim());
                 const orderData = buildErpPayload(rawOrderData, message);
 
                 await triggerWebhook(orderData);
                 
-                // Track order
+                // Stats y historial
+                stats.ordersToday++;
+                stats.erpSuccess++;
+                io.emit('stats-update', stats);
+
                 const orderSummary = {
                     id: orderData.eventId,
                     customer: orderData.customer.name,
@@ -158,24 +193,36 @@ client.on('message', async (message) => {
                 ordersHistory.push(orderSummary);
                 io.emit('new-order', orderSummary);
 
-                // Update chat status to confirmed
                 activeChats[chatId].status = 'confirmed';
                 io.emit('chat-update', activeChats[chatId]);
-
             } catch (jsonErr) {
-                console.error('❌ Error JSON:', jsonErr.message);
+                console.error('❌ Error al procesar JSON de la IA:', jsonErr.message);
             }
         }
+
+        // --- LIMPIEZA AGRESIVA ---
+        // 1. Quitar etiquetas y contenido interno
+        replyText = replyText.replace(/<ORDER_JSON>[\s\S]*?<\/ORDER_JSON>/gi, '').trim();
+        // 2. Quitar cualquier bloque que parezca JSON suelto (por si la IA falla las etiquetas)
+        replyText = replyText.replace(/\{[\s\S]*?\}/g, '').trim();
+        // 3. Quitar etiquetas huérfanas
+        replyText = replyText.replace(/<\/?[^>]+(>|$)/g, "").trim();
 
         chatHistories[chatId].push({ role: "model", parts: [{ text: aiResponse }] });
         if (chatHistories[chatId].length > 20) chatHistories[chatId] = chatHistories[chatId].slice(-20);
 
-        await client.sendMessage(chatId, replyText || "...");
+        // Si después de la limpieza no queda nada, enviar un mensaje de confirmación simple
+        if (!replyText && orderMatch) {
+            replyText = "¡Perfecto! Tu pedido ha sido enviado a cocina. 🍔";
+        }
+
+        await client.sendMessage(chatId, replyText || "Entendido.");
 
     } catch (error) {
         console.error('❌ Error:', error.message);
     }
 });
+
 
 async function triggerWebhook(orderData) {
     try {
