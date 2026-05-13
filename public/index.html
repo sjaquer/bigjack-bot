@@ -1,114 +1,142 @@
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Big Jack | Command Center</title>
-    <link rel="stylesheet" href="http://localhost:3000/style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
-    <script src="http://localhost:3000/socket.io/socket.io.js"></script>
+    <title>Big Jack Bot | Enterprise Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
 </head>
+<body>
+    <div class="app-container">
+        <!-- 1. BARRA DE NAVEGACIÓN (Sidebar Nav) -->
+        <nav class="nav-sidebar">
+            <div class="logo">🍔</div>
+            <div class="nav-icon active" onclick="showView('view-chats')" title="Mensajería">💬</div>
+            <div class="nav-icon" onclick="showView('view-inventory')" title="Inventario">📋</div>
+            <div class="nav-icon" onclick="showView('view-settings')" title="Ajustes">⚙️</div>
+            <div class="nav-spacer" style="flex: 1;"></div>
+            <div class="nav-icon danger" onclick="logout()" title="Cerrar Sesión">🚪</div>
+        </nav>
 
-
-<body class="dark-mode">
-    <div class="glass-container">
-        <header>
-            <div class="logo-area">
-                <h1>BIG <span>JACK</span></h1>
-                <p>Enterprise Control Panel</p>
-            </div>
-            <div class="header-actions">
-                <div id="bot-status-badge" class="status-badge starting">
-                    <span class="dot"></span>
-                    <span class="text">Iniciando...</span>
+        <!-- 2. PANEL DE LISTADO (Chats) -->
+        <aside class="list-panel">
+            <div class="panel-header">
+                <h2>Mensajería</h2>
+                <div class="search-box">
+                    <input type="text" id="chat-search" placeholder="Buscar cliente..." oninput="filterChats(this.value)">
                 </div>
-                <button id="logout-btn" class="mini-btn danger" onclick="logout()" title="Cerrar Sesión">🚪</button>
             </div>
-        </header>
+            <div id="chats-list" class="scroll-area">
+                <div class="empty-state">Iniciando...</div>
+            </div>
+        </aside>
 
-        <section class="stats-overview">
-            <div class="stat-card">
-                <span class="val" id="stat-orders">0</span>
-                <span class="lbl">Pedidos Hoy</span>
-            </div>
-            <div class="stat-card">
-                <span class="val" id="stat-msgs">0</span>
-                <span class="lbl">Msgs Procesados</span>
-            </div>
-            <div class="stat-card">
-                <span class="val" id="stat-success">0</span>
-                <span class="lbl">ERP Exitos</span>
-            </div>
-        </section>
+        <!-- 3. VIEWPORT PRINCIPAL (Chat o Configuración) -->
+        <main class="main-wrapper">
+            
+            <!-- VISTA DE CHAT (Dinámica) -->
+            <section id="view-chats" class="content-viewport">
+                <div class="viewport-header">
+                    <div class="active-user">
+                        <h3 id="active-chat-name">Selecciona un chat</h3>
+                        <span id="active-chat-sub" style="font-size: 0.8rem; color: var(--text-dim);">Esperando acción...</span>
+                    </div>
+                    <div class="header-actions">
+                        <div id="bot-status-badge" class="status-indicator starting">Iniciando</div>
+                        <button class="mini-btn" id="btn-pause-chat" style="display:none" onclick="toggleActiveChatBot()">⏸️ Pausar Bot</button>
+                    </div>
+                </div>
 
-        <main>
-            <section class="chats-sidebar">
-                <div class="card chats-card">
-                    <h2>Chats Activos</h2>
-                    <div id="chats-list" class="chats-list">
-                        <div class="empty-state">Sin actividad.</div>
+                <div class="chat-container">
+                    <div id="messages-container" class="messages-list">
+                        <div class="welcome-screen">
+                            <div class="hero">🍔</div>
+                            <h1>Bienvenido a Big Jack</h1>
+                            <p>Selecciona un cliente de la lista para gestionar su pedido en tiempo real.</p>
+                        </div>
+                    </div>
+                    <div class="input-bar" id="input-area" style="display:none">
+                        <div class="input-container">
+                            <input type="text" id="message-input" placeholder="Escribe un mensaje manual..." onkeypress="handleChatKey(event)">
+                            <button class="send-btn" onclick="sendManualMessage()">ENVIAR</button>
+                        </div>
                     </div>
                 </div>
             </section>
 
-            <section class="center-panel">
-                <div class="card settings-card">
-                    <div class="card-header">
-                        <h2>Control Maestro</h2>
-                        <div class="toggle-switch">
-                            <input type="checkbox" id="global-bot-toggle" onchange="toggleGlobalBot(this.checked)" checked>
-                            <label for="global-bot-toggle" class="switch-label"></label>
+            <!-- VISTA DE INVENTARIO -->
+            <section id="view-inventory" class="content-viewport" style="display:none">
+                <div class="viewport-header">
+                    <h3>Gestión de Inventario</h3>
+                    <p style="font-size: 0.8rem; color: var(--text-dim);">Apaga productos agotados para actualizar a la IA.</p>
+                </div>
+                <div class="scroll-area" style="padding: 24px;">
+                    <div id="inventory-list" class="inventory-grid">
+                        <!-- Items dinámicos -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- VISTA DE AJUSTES -->
+            <section id="view-settings" class="content-viewport" style="display:none">
+                <div class="viewport-header">
+                    <h3>Ajustes del Sistema</h3>
+                </div>
+                <div class="scroll-area" style="padding: 24px;">
+                    <div class="card settings-card">
+                        <div class="setting-item">
+                            <label>IA Maestra</label>
+                            <div class="toggle-group">
+                                <span>Activar Automatización</span>
+                                <div class="toggle-switch">
+                                    <input type="checkbox" id="global-bot-toggle" onchange="toggleGlobalBot(this.checked)" checked>
+                                    <label for="global-bot-toggle" class="switch-label"></label>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                    
-                    <div class="selector-group">
-                        <label>Motor de Inteligencia</label>
-                        <select id="ai-selector" onchange="setProvider(this.value)"></select>
-                    </div>
-                    
-                    <div class="metrics">
-                        <div class="metric">
-                            <label>Contexto IA</label>
-                            <div class="progress-bar">
-                                <div id="token-progress" class="fill" style="width: 25%;"></div>
+                        <div class="setting-item" style="margin-top: 24px;">
+                            <label>Proveedor y Modelo</label>
+                            <select id="ai-selector" class="custom-select" onchange="setProvider(this.value)"></select>
+                        </div>
+
+                        <div class="qr-section" id="qr-container" style="margin-top: 40px;">
+                            <label>Conexión WhatsApp</label>
+                            <div class="qr-box">
+                                <div id="qr-placeholder">Esperando señal...</div>
+                                <div id="qr-image-container" style="display:none"><canvas id="qr-canvas"></canvas></div>
                             </div>
                         </div>
                     </div>
                 </div>
-
-
-                <div class="card qr-card" id="qr-container">
-                    <h2>Conexión</h2>
-                    <div id="qr-placeholder" class="qr-content">
-                        <p>Iniciando...</p>
-                    </div>
-                    <div id="qr-image-container" style="display: none;">
-                        <canvas id="qr-canvas"></canvas>
-                    </div>
-                </div>
             </section>
 
-            <section class="orders-panel">
-                <div class="card history-card">
-                    <div class="card-header">
-                        <h2>Pedidos</h2>
-                        <span id="order-count" class="badge">0</span>
+            <!-- 4. PANEL DE INFORMACIÓN (Derecha) -->
+            <aside class="info-panel">
+                <h2>Actividad</h2>
+                <div class="stat-grid" style="margin-top: 24px;">
+                    <div class="mini-card">
+                        <span class="val" id="stat-orders">0</span>
+                        <span class="lbl">Pedidos Hoy</span>
                     </div>
-                    <div id="orders-list" class="orders-list">
-                        <div class="empty-state">Sin pedidos.</div>
+                    <div class="mini-card">
+                        <span class="val" id="stat-msgs">0</span>
+                        <span class="lbl">Msgs Procesados</span>
                     </div>
                 </div>
-            </section>
+
+                <div class="orders-section" style="margin-top: 32px;">
+                    <h3>Últimas Órdenes</h3>
+                    <div id="orders-list" class="orders-mini-list">
+                        <!-- Listado de órdenes -->
+                    </div>
+                </div>
+            </aside>
         </main>
     </div>
 
-    <!-- Sonido de notificación -->
-    <audio id="notif-sound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"
-        preload="auto"></audio>
-
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+    <audio id="notif-sound" src="https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3"></audio>
     <script src="app.js"></script>
 </body>
-
 </html>

@@ -8,9 +8,21 @@ const cors = require('cors');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const axios = require('axios');
-const { systemInstruction } = require('./sytemPrompt');
+const { systemInstruction: baseInstruction } = require('./sytemPrompt');
+const menuData = require('./menuData');
 const aiProvider = require('./aiProvider');
 const config = require('./config');
+
+// Generar prompt dinámico según disponibilidad actual
+function getDynamicPrompt() {
+    const activeMenu = menuData.map(item => {
+        const options = item.options.map(opt => `${opt.label} (Ref: ${opt.sku})`).join(', ');
+        const availability = item.available === false ? '(AGOTADO)' : '';
+        return `- ${item.name} ${availability}: [${options}]`;
+    }).join('\n');
+
+    return baseInstruction.replace('${menuList}', activeMenu);
+}
 
 // --- EXPRESS & SOCKET.IO SETUP ---
 const app = express();
@@ -56,9 +68,35 @@ app.get('/api/status', (req, res) => {
     });
 });
 
+app.get('/api/menu', (req, res) => {
+    res.json(menuData);
+});
+
+app.post('/api/inventory', (req, res) => {
+    const { sku, available } = req.body;
+    
+    // 1. Actualizar en memoria
+    const item = menuData.find(i => i.options.some(o => o.sku === sku) || i.name === sku);
+    if (item) {
+        item.available = available;
+        
+        // 2. Persistir en el archivo menuData.js para que no se pierda al reiniciar
+        try {
+            const filePath = path.join(__dirname, 'menuData.js');
+            const fileContent = `const menuData = ${JSON.stringify(menuData, null, 4)};\n\nmodule.exports = menuData;`;
+            fs.writeFileSync(filePath, fileContent, 'utf8');
+            res.json({ success: true, item });
+        } catch (err) {
+            console.error('Error guardando inventario:', err);
+            res.status(500).json({ error: 'No se pudo guardar en disco' });
+        }
+    } else {
+        res.status(404).json({ error: 'Producto no encontrado' });
+    }
+});
+
 app.post('/api/control', (req, res) => {
     const { action, chatId, value } = req.body;
-    
     if (action === 'toggle-global') {
         botEnabled = value;
         io.emit('status-update', { botEnabled });
@@ -71,6 +109,26 @@ app.post('/api/control', (req, res) => {
     res.json({ success: true });
 });
 
+// Enviar mensaje manual (Human Chat)
+app.post('/api/send-message', async (req, res) => {
+    const { chatId, message } = req.body;
+    try {
+        await client.sendMessage(chatId, message);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get('/api/labels', async (req, res) => {
+    try {
+        const labels = await client.getLabels();
+        res.json(labels);
+    } catch (e) {
+        res.json([]); // Fallback si no es cuenta Business
+    }
+});
+
 app.post('/api/logout', async (req, res) => {
     try {
         await client.logout();
@@ -79,6 +137,7 @@ app.post('/api/logout', async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
+
 
 app.get('/api/chats', (req, res) => {
     res.json(Object.values(activeChats).sort((a, b) => b.timestamp - a.timestamp));
@@ -138,22 +197,58 @@ client.on('message', async (message) => {
     const chatId = message.from;
     const isPaused = activeChats[chatId]?.botPaused;
     
-    // Increment message count
+    // Stats
     stats.messagesProcessed++;
     io.emit('stats-update', stats);
+
+    // Contenido resumido según el tipo
+    let preview = message.body;
+    if (message.type === 'location') preview = "📍 Ubicación compartida";
+    if (message.type === 'vcard') preview = "👤 Contacto compartido";
+    if (message.type === 'order') preview = "🛒 Nuevo pedido de catálogo";
 
     // Update active chats
     activeChats[chatId] = {
         id: chatId,
         phone: normalizePhone(chatId),
-        lastMessage: message.body.substring(0, 50),
+        lastMessage: preview.substring(0, 50),
         status: activeChats[chatId]?.status || 'pending',
         botPaused: isPaused || false,
         timestamp: Date.now()
     };
+
+    // Emit message to Chat UI
+    io.emit('new-message', {
+        chatId,
+        body: message.body,
+        fromMe: false,
+        type: message.type,
+        timestamp: message.timestamp,
+        location: message.location || null
+    });
+    
     io.emit('chat-update', activeChats[chatId]);
 
-    // Si el bot está apagado globalmente o para este chat, no responder
+    // LÓGICA ESPECIAL PARA PEDIDOS NATIVOS (Carrito de WhatsApp)
+    if (message.type === 'order') {
+        try {
+            const order = await message.getOrder();
+            const orderData = {
+                eventId: `WACART-${Date.now()}`,
+                customer: { name: (await message.getContact()).pushname || 'Cliente WA', phone: normalizePhone(chatId) },
+                items: order.products.map(p => ({ sku: p.id, quantity: p.quantity, price: p.price })),
+                paymentMethod: 'Por definir (Carrito WA)',
+                source: 'wa-native-cart',
+                timestamp: new Date().toISOString()
+            };
+            await triggerWebhook(orderData);
+            activeChats[chatId].status = 'confirmed';
+            io.emit('chat-update', activeChats[chatId]);
+            io.emit('new-order', orderData);
+            return; // No procesar con IA si es carrito nativo (ya es un pedido)
+        } catch (e) { console.error('Error procesando carrito WA:', e); }
+    }
+
     if (!botEnabled || isPaused) return;
 
     if (!chatHistories[chatId]) chatHistories[chatId] = [];
@@ -162,7 +257,8 @@ client.on('message', async (message) => {
         const chat = await message.getChat();
         await chat.sendStateTyping();
 
-        const aiResponse = await aiProvider.sendMessage(chatHistories[chatId], message.body, systemInstruction);
+        const prompt = getDynamicPrompt();
+        const aiResponse = await aiProvider.sendMessage(chatHistories[chatId], message.body, prompt);
 
         chatHistories[chatId].push({ role: "user", parts: [{ text: message.body }] });
 
@@ -171,14 +267,11 @@ client.on('message', async (message) => {
         let replyText = aiResponse;
 
         if (orderMatch) {
-            // Extraer JSON
             try {
                 const rawOrderData = JSON.parse(orderMatch[1].trim());
                 const orderData = buildErpPayload(rawOrderData, message);
-
                 await triggerWebhook(orderData);
                 
-                // Stats y historial
                 stats.ordersToday++;
                 stats.erpSuccess++;
                 io.emit('stats-update', stats);
@@ -201,22 +294,28 @@ client.on('message', async (message) => {
         }
 
         // --- LIMPIEZA AGRESIVA ---
-        // 1. Quitar etiquetas y contenido interno
         replyText = replyText.replace(/<ORDER_JSON>[\s\S]*?<\/ORDER_JSON>/gi, '').trim();
-        // 2. Quitar cualquier bloque que parezca JSON suelto (por si la IA falla las etiquetas)
         replyText = replyText.replace(/\{[\s\S]*?\}/g, '').trim();
-        // 3. Quitar etiquetas huérfanas
         replyText = replyText.replace(/<\/?[^>]+(>|$)/g, "").trim();
 
-        chatHistories[chatId].push({ role: "model", parts: [{ text: aiResponse }] });
-        if (chatHistories[chatId].length > 20) chatHistories[chatId] = chatHistories[chatId].slice(-20);
-
-        // Si después de la limpieza no queda nada, enviar un mensaje de confirmación simple
         if (!replyText && orderMatch) {
             replyText = "¡Perfecto! Tu pedido ha sido enviado a cocina. 🍔";
         }
 
-        await client.sendMessage(chatId, replyText || "Entendido.");
+        chatHistories[chatId].push({ role: "model", parts: [{ text: aiResponse }] });
+        if (chatHistories[chatId].length > 20) chatHistories[chatId] = chatHistories[chatId].slice(-20);
+
+        const finalMsg = replyText || "Entendido.";
+
+        // Emitir respuesta del bot al Dashboard
+        io.emit('new-message', {
+            chatId,
+            body: finalMsg,
+            fromMe: true,
+            timestamp: Math.floor(Date.now() / 1000)
+        });
+
+        await client.sendMessage(chatId, finalMsg);
 
     } catch (error) {
         console.error('❌ Error:', error.message);
