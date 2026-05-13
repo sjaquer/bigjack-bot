@@ -1,0 +1,15 @@
+{
+  "eventId": "test-order-001",
+  "orderDate": "2024-05-13T10:00:00Z",
+  "source": "bot-test",
+  "customer": {
+    "name": "Cliente de Prueba",
+    "phone": "987654321"
+  },
+  "paymentMethod": "efectivo",
+  "notes": "Cliente pide confirmar cuando salga el pedido",
+  "items": [
+    { "sku": "PRD-LAM-IPH3", "quantity": 1, "notes": "sin pickles" },
+    { "sku": "PRD-INK-PXC0", "quantity": 1, "notes": "" }
+  ]
+}

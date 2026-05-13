@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# WhatsApp Web Session
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Environment Variables
+.env
+.env.local
+
+# Logs
+*.log
+erp-errors.log
+
+# OS Files
+.DS_Store
+Thumbs.db
