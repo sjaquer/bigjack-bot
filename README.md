@@ -1,70 +1,78 @@
-# 🍔 Big Jack WhatsApp Bot
+# 🍔 Big Jack Bot | Command Center
 
-¡Bienvenido al asistente virtual oficial de **Big Jack**! Este bot automatiza la toma de pedidos mediante inteligencia artificial (Gemini u Ollama) y los integra directamente con un sistema ERP mediante webhooks.
+![Version](https://img.shields.io/badge/version-1.3.0-orange)
+![Electron](https://img.shields.io/badge/platform-Windows-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-Este proyecto está diseñado para ser robusto, escalable y fácil de integrar en cualquier flujo de trabajo gastronómico.
+**Big Jack Bot** es una solución híbrida de escritorio diseñada para automatizar la toma de pedidos en hamburgueserías y restaurantes. Combina la estabilidad de una aplicación nativa con la inteligencia de modelos de lenguaje avanzados (LLMs).
 
-## 🚀 Características
+---
 
-- 🤖 **IA Multiproveedor**: Soporte para Google Gemini (Cloud) y Ollama (Local).
-- 📲 **WhatsApp Web**: Integración fluida mediante `whatsapp-web.js`.
-- 🛒 **Flujo de Pedidos Inteligente**: Capacidad para entender lenguaje natural y convertirlo en JSON estructurado para ERPs.
-- 🔐 **Seguridad**: Gestión de secretos mediante variables de entorno y validación de webhooks.
-- 📊 **Logs de Error**: Registro detallado de fallos en la comunicación con el ERP para fácil depuración.
+## 🚀 Características Principales
+
+*   **Aplicación Híbrida de Escritorio:** Desarrollada con Electron para una experiencia "todo-en-uno" sin necesidad de terminales abiertas.
+*   **Inteligencia Dual:**
+    *   **Local:** Integración total con **Ollama** (Phi-3, Llama 3, Gemma) para máxima privacidad y costo cero.
+    *   **Cloud:** Conexión con **Google Gemini API** (2.0 Flash, 1.5 Pro) para alta precisión.
+*   **Gestión Multi-Chat en Tiempo Real:** Sidebar de monitoreo que permite ver quién está escribiendo y el estado del pedido (**Pendiente / Confirmado**).
+*   **IA de Respuesta Rápida:** Optimizada para ser ultra-concisa (< 200 caracteres) y ocultar detalles técnicos (SKUs) al cliente.
+*   **Notificaciones Inteligentes:** Alertas sonoras y visuales inmediatas cuando se detecta un pedido nuevo.
+*   **Integración ERP:** Generación automática de JSON y envío directo a sistemas externos mediante Webhooks seguros.
+
+---
 
 ## 🛠️ Tecnologías Usadas
 
-- **Node.js**
-- **WhatsApp-Web.js** (Cliente de WhatsApp)
-- **Google Generative AI** (Gemini)
-- **Ollama** (Modelos locales como Llama3)
-- **Axios** (Comunicación HTTP)
-- **Dotenv** (Gestión de configuración)
-
-## 📋 Requisitos Previos
-
-- Node.js (v16 o superior)
-- Una API Key de Google Gemini (opcional)
-- Ollama instalado localmente (opcional)
-
-## ⚙️ Instalación
-
-1. Clona el repositorio:
-   ```bash
-   git clone https://github.com/tu-usuario/bigjack-bot.git
-   cd bigjack-bot
-   ```
-
-2. Instala las dependencias:
-   ```bash
-   npm install
-   ```
-
-3. Configura las variables de entorno:
-   Copia el archivo `.env.example` a `.env` y rellena los datos necesarios.
-   ```bash
-   cp .env.example .env
-   ```
-
-## 🚀 Uso
-
-Inicia el bot con el siguiente comando:
-```bash
-node index.js
-```
-Escanea el código QR que aparecerá en la terminal con tu aplicación de WhatsApp.
-
-## 📂 Estructura del Proyecto
-
-- `index.js`: Punto de entrada y lógica principal del bot.
-- `aiProvider.js`: Módulo para gestionar diferentes proveedores de IA.
-- `config.js`: Centralización de configuraciones y variables de entorno.
-- `sytemPrompt.js`: Instrucciones y personalidad del asistente.
-- `menuData.js`: Base de datos local de productos y SKUs.
-
-## 🤝 Contribuciones
-
-Las contribuciones son bienvenidas. Si tienes alguna idea para mejorar el bot, no dudes en abrir un Issue o un Pull Request.
+*   **Core:** Node.js, Express, Socket.io
+*   **Desktop:** Electron (Hybrid Architecture)
+*   **WhatsApp:** WhatsApp-web.js (Chromium-based engine)
+*   **AI Providers:** Google Generative AI & Ollama API
+*   **UI/UX:** Vanilla CSS con estética Premium (Glassmorphism & Dark Mode)
 
 ---
-Desarrollado con ❤️ por [Tu Nombre/Portafolio]
+
+## 📦 Instalación y Uso
+
+### Requisitos Previos
+*   [Node.js](https://nodejs.org/) (Versión 18 o superior)
+*   [Ollama](https://ollama.ai/) (Opcional, para modelos locales)
+
+### Configuración
+1.  Clona el repositorio.
+2.  Copia el archivo `.env.example` a `.env` y completa tus credenciales (Gemini API Key, Webhook URL).
+3.  Instala las dependencias:
+    ```bash
+    npm install
+    ```
+
+### Ejecución
+*   **Modo Desarrollo:**
+    ```bash
+    npm run electron
+    ```
+*   **Generar Ejecutable (.exe):**
+    ```bash
+    npm run dist
+    ```
+
+---
+
+## 📐 Arquitectura
+
+El bot opera como un puente entre el cliente (WhatsApp) y el negocio (ERP). Utiliza un motor de navegador real para evitar baneos y garantizar la seguridad del número principal del comercio.
+
+1.  **Recepción:** El mensaje llega a través de WhatsApp Web.
+2.  **Procesamiento:** La IA (Local o Cloud) analiza el texto según el `systemPrompt` dinámico cargado desde el inventario.
+3.  **Confirmación:** Una vez que el cliente confirma el resumen, el bot extrae el JSON.
+4.  **Ejecución:** Se notifica al panel de control y se envía la orden al ERP para producción en cocina.
+
+---
+
+## 🛡️ Seguridad y Privacidad
+Este proyecto ha sido diseñado siguiendo las mejores prácticas:
+*   Las API Keys y secretos se gestionan estrictamente vía variables de entorno.
+*   La persistencia de sesión es local y privada.
+*   El uso de Ollama permite que los datos de los clientes nunca salgan de tu servidor local.
+
+---
+**Desarrollado por [Sebastián Jaque](https://github.com/tu-usuario) para el portfolio de Aplicaciones Empresariales.**
