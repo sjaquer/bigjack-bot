@@ -2,5 +2,6 @@
   "botDelay": 0,
   "botEnabled": true,
   "provider": "ollama",
-  "model": "gemma4:e2b"
+  "model": "gemma4:e2b",
+  "showLogs": false
 }
