@@ -16,29 +16,18 @@ const config = require('./config');
 const CONFIG_PATH = path.join(__dirname, 'bot-settings.json');
 
 // --- SISTEMA DE PERSISTENCIA MAESTRO ---
-let botSettings = { 
-    botDelay: 2000, 
-    botEnabled: true,
-    provider: config.ai.provider || 'gemini',
-    model: '' 
-};
+let botSettings = { botDelay: 2000, botEnabled: true, provider: config.ai.provider || 'gemini', model: '' };
 
-// Cargar ajustes al arrancar
 if (fs.existsSync(CONFIG_PATH)) {
     try { 
         const saved = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')); 
         botSettings = { ...botSettings, ...saved };
-        // Aplicar ajustes al proveedor de IA de inmediato
         aiProvider.setSettings(botSettings.provider, botSettings.model);
-        console.log(`[Persistencia] Ajustes cargados: ${botSettings.provider} | ${botSettings.model}`);
-    } catch (e) { console.error('Error cargando persistencia'); }
+    } catch (e) { }
 }
 
-function saveSettings() {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(botSettings, null, 2));
-}
+function saveSettings() { fs.writeFileSync(CONFIG_PATH, JSON.stringify(botSettings, null, 2)); }
 
-// Generar prompt dinámico
 function getDynamicPrompt(provider) {
     const activeMenu = menuData.map(item => {
         const options = item.options.map(opt => `${opt.label} (Ref: ${opt.sku})`).join(', ');
@@ -64,6 +53,7 @@ const activeChats = {};
 const stats = { ordersToday: 0, messagesProcessed: 0, erpSuccess: 0, erpErrors: 0 };
 let botStatus = 'starting';
 
+const botTimers = {};
 function isInstanceEligible(chatId) {
     const total = config.multiInstance.totalInstances;
     if (total <= 1) return true;
@@ -72,35 +62,17 @@ function isInstanceEligible(chatId) {
 }
 
 // API Endpoints
-app.get('/api/status', (req, res) => {
-    res.json({
-        status: botStatus,
-        botEnabled: botSettings.botEnabled,
-        botDelay: botSettings.botDelay,
-        provider: botSettings.provider,
-        model: botSettings.model || aiProvider.activeModel,
-        stats,
-        instance: config.multiInstance
-    });
-});
+app.get('/api/status', (req, res) => res.json({ status: botStatus, botEnabled: botSettings.botEnabled, botDelay: botSettings.botDelay, provider: botSettings.provider, model: botSettings.model || aiProvider.activeModel, stats, instance: config.multiInstance }));
 
 app.post('/api/settings', (req, res) => {
     const { provider, model, delay, enabled } = req.body;
-    
     if (provider) botSettings.provider = provider;
     if (model) botSettings.model = model;
     if (delay !== undefined) botSettings.botDelay = parseInt(delay);
     if (enabled !== undefined) botSettings.botEnabled = enabled;
-
     aiProvider.setSettings(botSettings.provider, botSettings.model);
     saveSettings();
-
-    io.emit('settings-updated', { 
-        provider: botSettings.provider, 
-        model: botSettings.model, 
-        delay: botSettings.botDelay,
-        enabled: botSettings.botEnabled
-    });
+    io.emit('settings-updated', botSettings);
     res.json({ success: true });
 });
 
@@ -110,9 +82,7 @@ app.post('/api/inventory', (req, res) => {
     const item = menuData.find(i => i.options?.some(o => o.sku === sku) || i.name === sku);
     if (item) {
         item.available = available;
-        const filePath = path.join(__dirname, 'menuData.js');
-        const fileContent = `const menuData = ${JSON.stringify(menuData, null, 4)};\n\nmodule.exports = menuData;`;
-        fs.writeFileSync(filePath, fileContent, 'utf8');
+        fs.writeFileSync(path.join(__dirname, 'menuData.js'), `const menuData = ${JSON.stringify(menuData, null, 4)};\n\nmodule.exports = menuData;`, 'utf8');
         res.json({ success: true, item });
     } else res.status(404).json({ error: 'No encontrado' });
 });
@@ -121,17 +91,20 @@ app.post('/api/control', async (req, res) => {
     const { action, chatId, value } = req.body;
     if (action === 'toggle-chat' && chatId && activeChats[chatId]) {
         activeChats[chatId].botPaused = value;
-        if (value && botTimers[chatId]) {
-            clearTimeout(botTimers[chatId]);
-            delete botTimers[chatId];
-            io.emit('timer-update', { chatId, active: false });
-        }
+        if (value && botTimers[chatId]) { clearTimeout(botTimers[chatId]); delete botTimers[chatId]; io.emit('timer-update', { chatId, active: false }); }
         io.emit('chat-update', activeChats[chatId]);
     }
-    if (action === 'cancel-timer' && chatId && botTimers[chatId]) {
-        clearTimeout(botTimers[chatId]);
-        delete botTimers[chatId];
+    
+    // CORRECCIÓN: Lógica de Reinicio y Cancelado
+    if (action === 'cancel-timer' && chatId) {
+        if (botTimers[chatId]) { clearTimeout(botTimers[chatId]); delete botTimers[chatId]; }
         io.emit('timer-update', { chatId, active: false });
+    }
+    if (action === 'restart-timer' && chatId) {
+        if (botTimers[chatId]) clearTimeout(botTimers[chatId]);
+        const delay = botSettings.botDelay;
+        io.emit('timer-update', { chatId, active: true, duration: delay, expiresAt: Date.now() + delay });
+        botTimers[chatId] = setTimeout(() => processBotResponse(chatId), delay);
     }
     if (action === 'force-response' && chatId) {
         if (botTimers[chatId]) { clearTimeout(botTimers[chatId]); delete botTimers[chatId]; }
@@ -164,7 +137,6 @@ const client = new Client({
     puppeteer: { headless: config.whatsapp.headless, args: ['--no-sandbox'], executablePath: config.whatsapp.chromePath }
 });
 
-const botTimers = {};
 client.on('qr', (qr) => { botStatus = 'qr_required'; io.emit('qr', qr); });
 client.on('ready', () => { botStatus = 'ready'; io.emit('status', 'ready'); });
 
@@ -231,7 +203,15 @@ async function processBotResponse(chatId) {
                 io.emit('order-update', orderSummary);
             } catch (e) { }
         }
-        replyText = replyText.replace(/<ORDER_JSON>[\s\S]*?<\/ORDER_JSON>/gi, '').replace(/###DATA###[\s\S]*?###DATA###/gi, '').replace(/```[\s\S]*?```/g, '').replace(/\{[\s\S]*?\}/g, '').trim();
+        
+        // --- LIMPIEZA AGRESIVA Y CORRECCIÓN DE FORMATO WHATSAPP ---
+        replyText = replyText.replace(/<ORDER_JSON>[\s\S]*?<\/ORDER_JSON>/gi, '')
+                             .replace(/###DATA###[\s\S]*?###DATA###/gi, '')
+                             .replace(/```[\s\S]*?```/g, '')
+                             .replace(/\{[\s\S]*?\}/g, '')
+                             .replace(/\*\*/g, '*') // Convertir doble asterisco a simple (WhatsApp style)
+                             .trim();
+
         const finalMsg = replyText || "¡Perfecto! Tu pedido ha sido enviado a cocina. 🍔";
         chatHistories[chatId].push({ role: "model", parts: [{ text: aiResponse }] });
         await client.sendMessage(chatId, finalMsg);

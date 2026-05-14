@@ -1,10 +1,10 @@
 const getPrompts = (menuList) => {
     
     const whatsappFormatting = `
-    - Usa *negritas* para nombres de hamburguesas o puntos clave.
-    - Usa _cursivas_ para ingredientes o recomendaciones.
-    - Usa listas con guiones (-) para enumerar opciones.
-    - Mantén los párrafos cortos para facilitar la lectura en el móvil.
+    - IMPORTANTE: Usa UN SOLO asterisco (*) para poner *negritas*. NUNCA uses dos asteriscos (**).
+    - Usa _cursivas_ para resaltar detalles o ingredientes.
+    - Usa listas con guiones (-) para que se vea ordenado.
+    - Mantén los mensajes cortos y fáciles de leer.
     `;
 
     const commonRules = `
