@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 import axios from 'axios';
-import { MessageSquare, Settings, Box, LogOut, Pause, Play, Send, Clock, XCircle, Zap, RefreshCw, Smartphone, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { MessageSquare, Settings, Box, LogOut, Pause, Play, Send, Clock, XCircle, Zap, RefreshCw, Smartphone, AlertTriangle, CheckCircle2, Terminal } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import './index.css';
 
@@ -19,6 +19,8 @@ export default function App() {
   const [currentProvider, setCurrentProvider] = useState('');
   const [currentModel, setCurrentModel] = useState('');
   const [botDelay, setBotDelay] = useState(2000);
+  const [showLogs, setShowLogs] = useState(false);
+  const [logs, setLogs] = useState([]);
 
   const [chats, setChats] = useState({});
   const [activeChatId, setActiveChatId] = useState(null);
@@ -61,6 +63,10 @@ export default function App() {
         const newAlert = { id: Date.now(), ...err };
         setAlerts(prev => [newAlert, ...prev]);
         setTimeout(() => setAlerts(prev => prev.filter(a => a.id !== newAlert.id)), 8000);
+    });
+
+    socket.on('app-log', (log) => {
+        setLogs(prev => [log, ...prev].slice(0, 50));
     });
     
     socket.on('chat-update', (chat) => {
@@ -138,6 +144,7 @@ export default function App() {
       setCurrentProvider(res.data.provider);
       setCurrentModel(res.data.model);
       setBotDelay(res.data.botDelay || 2000);
+      setShowLogs(res.data.showLogs || false);
       if (res.data.instance) setInstanceInfo(res.data.instance);
     } catch (e) { console.error('Status failed'); }
   };
@@ -214,7 +221,8 @@ export default function App() {
         await axios.post(`${SERVER_URL}/api/settings`, { 
             provider: finalProvider, 
             model: finalModel, 
-            delay: finalDelay 
+            delay: finalDelay,
+            showLogs: showLogs // Incluir el estado actual si no se pasa explícitamente
         });
         
         // Actualizamos estado local
@@ -224,6 +232,13 @@ export default function App() {
     } catch (e) {
         console.error('Error actualizando ajustes:', e);
     }
+  };
+
+  const toggleShowLogs = async (val) => {
+    setShowLogs(val);
+    try {
+        await axios.post(`${SERVER_URL}/api/settings`, { showLogs: val });
+    } catch (e) { }
   };
 
   const handleModelChange = (e) => {
@@ -266,6 +281,7 @@ export default function App() {
         <div className={`nav-icon ${view==='chats'?'active':''}`} onClick={()=>setView('chats')} title="Mensajería"><MessageSquare size={28} /></div>
         <div className={`nav-icon ${view==='inventory'?'active':''}`} onClick={()=>setView('inventory')} title="Inventario"><Box size={28} /></div>
         <div className={`nav-icon ${view==='settings'?'active':''}`} onClick={()=>setView('settings')} title="Ajustes"><Settings size={28} /></div>
+        <div className={`nav-icon ${showLogs?'active':''}`} onClick={()=>toggleShowLogs(!showLogs)} title="Ver Consola"><Terminal size={28} /></div>
         <div style={{flex:1}}></div>
         <div className="nav-icon danger" onClick={logout} title="Cerrar Sesión"><LogOut size={28} /></div>
       </nav>
@@ -346,6 +362,7 @@ export default function App() {
                         )}
 
                         <div style={{display:'flex', gap: 15, alignItems:'center'}}>
+                           <button className="mini-btn" onClick={fetchInitialData} title="Cargar Cambios"><RefreshCw size={18} /></button>
                            <div className="mini-card" style={{padding:'6px 12px', background:'rgba(255,255,255,0.05)', border:'1px solid var(--glass-border)', fontSize:'0.75rem'}}>
                                 <span style={{color:'var(--text-dim)'}}>ID:</span> <b style={{color:'var(--accent-teal)'}}>{instanceInfo.instanceId}</b>
                                 <span style={{margin:'0 10px', color:'var(--glass-border)'}}>|</span>
@@ -382,6 +399,25 @@ export default function App() {
 
                         <div ref={messagesEndRef} />
                         </div>
+                        
+                        {showLogs && (
+                            <div className="chat-console">
+                                <div className="console-header">
+                                    <span>SISTEMA LOGS</span>
+                                    <button onClick={() => setLogs([])}>Limpiar</button>
+                                </div>
+                                <div className="console-body">
+                                    {logs.map((log, i) => (
+                                        <div key={i} className={`log-line ${log.type}`}>
+                                            <span className="time">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                                            <span className="type">[{log.type.toUpperCase()}]</span>
+                                            <span className="msg">{log.message}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
                         {activeChat && (
                         <div className="input-bar">
                             <div className="input-container">

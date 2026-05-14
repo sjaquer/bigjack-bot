@@ -16,7 +16,14 @@ const config = require('./config');
 const CONFIG_PATH = path.join(__dirname, 'bot-settings.json');
 
 // --- SISTEMA DE PERSISTENCIA MAESTRO ---
-let botSettings = { botDelay: 2000, botEnabled: true, provider: config.ai.provider || 'gemini', model: '' };
+let botSettings = { botDelay: 2000, botEnabled: true, provider: config.ai.provider || 'gemini', model: '', showLogs: false };
+
+// --- LOGGER GLOBAL ---
+function appLog(message, type = 'info') {
+    const logObj = { timestamp: Date.now(), message, type };
+    console.log(`[${type.toUpperCase()}] ${message}`);
+    io.emit('app-log', logObj);
+}
 
 if (fs.existsSync(CONFIG_PATH)) {
     try { 
@@ -28,13 +35,16 @@ if (fs.existsSync(CONFIG_PATH)) {
 
 function saveSettings() { fs.writeFileSync(CONFIG_PATH, JSON.stringify(botSettings, null, 2)); }
 
+// Generar prompt dinámico en formato TOON (Token-Oriented Object Notation)
 function getDynamicPrompt(provider) {
-    const activeMenu = menuData.map(item => {
-        const options = item.options.map(opt => `${opt.label} (Ref: ${opt.sku})`).join(', ');
-        const availability = item.available === false ? '(AGOTADO)' : '';
-        return `- ${item.name} ${availability}: [${options}]`;
+    const header = "id,sku,cat,name,desc,pop,avail,opts(id:label:price)";
+    const activeMenu = menuData.map(i => {
+        const opts = i.options.map(o => `${o.id}:${o.label}:S/ ${o.price}`).join('|');
+        return `${i.id},${i.sku},${i.category},${i.name},${i.description},${i.popular},${i.available!==false},${opts}`;
     }).join('\n');
-    const { GEMINI_PROMPT, LOCAL_PROMPT } = getPrompts(activeMenu);
+    
+    const toonMenu = `${header}\n${activeMenu}`;
+    const { GEMINI_PROMPT, LOCAL_PROMPT } = getPrompts(toonMenu);
     return provider === 'gemini' ? GEMINI_PROMPT : LOCAL_PROMPT;
 }
 
@@ -62,17 +72,19 @@ function isInstanceEligible(chatId) {
 }
 
 // API Endpoints
-app.get('/api/status', (req, res) => res.json({ status: botStatus, botEnabled: botSettings.botEnabled, botDelay: botSettings.botDelay, provider: botSettings.provider, model: botSettings.model || aiProvider.activeModel, stats, instance: config.multiInstance }));
+app.get('/api/status', (req, res) => res.json({ status: botStatus, botEnabled: botSettings.botEnabled, botDelay: botSettings.botDelay, provider: botSettings.provider, model: botSettings.model || aiProvider.activeModel, showLogs: botSettings.showLogs, stats, instance: config.multiInstance }));
 
 app.post('/api/settings', (req, res) => {
-    const { provider, model, delay, enabled } = req.body;
+    const { provider, model, delay, enabled, showLogs } = req.body;
     if (provider) botSettings.provider = provider;
     if (model) botSettings.model = model;
     if (delay !== undefined) botSettings.botDelay = parseInt(delay);
     if (enabled !== undefined) botSettings.botEnabled = enabled;
+    if (showLogs !== undefined) botSettings.showLogs = showLogs;
     aiProvider.setSettings(botSettings.provider, botSettings.model);
     saveSettings();
     io.emit('settings-updated', botSettings);
+    appLog(`Ajustes actualizados: ${JSON.stringify(req.body)}`);
     res.json({ success: true });
 });
 
@@ -82,7 +94,17 @@ app.post('/api/inventory', (req, res) => {
     const item = menuData.find(i => i.options?.some(o => o.sku === sku) || i.name === sku);
     if (item) {
         item.available = available;
-        fs.writeFileSync(path.join(__dirname, 'menuData.js'), `const menuData = ${JSON.stringify(menuData, null, 4)};\n\nmodule.exports = menuData;`, 'utf8');
+        appLog(`Inventario actualizado: ${sku} -> ${available ? 'Disponible' : 'Agotado'}`, 'inventory');
+        
+        // Re-generar contenido TOON para persistencia
+        const lines = menuData.map(i => {
+            const opts = i.options.map(o => `${o.id}:${o.label}:${o.price}:${o.sku}`).join('|');
+            return `${i.id},${i.sku},${i.category},${i.name},${i.description},${i.popular},${i.available!==false},${opts}`;
+        }).join('\n');
+        
+        const fileContent = `/**\n * TOON (Token-Oriented Object Notation) - Optimized for AI Context\n * FIELDS: id, sku, category, name, description, popular, available, options\n * OPTIONS: id:label:price:sku (separated by |)\n */\n\nconst toonData = \`\n${lines}\n\`.trim();\n\nfunction parseTOON(data) {\n    return data.split('\\n').map(line => {\n        const [id, sku, category, name, description, popular, available, optionsStr] = line.split(',');\n        const options = optionsStr.split('|').map(opt => {\n            const [optId, label, price, optSku] = opt.split(':');\n            return { id: optId, sku: optSku || sku, label, price: parseFloat(price) };\n        });\n        return {\n            id: parseInt(id),\n            sku,\n            category,\n            name,\n            description,\n            popular: popular === 'true',\n            available: available !== 'false',\n            options\n        };\n    });\n}\n\nmodule.exports = parseTOON(toonData);\n`;
+        
+        fs.writeFileSync(path.join(__dirname, 'menuData.js'), fileContent, 'utf8');
         res.json({ success: true, item });
     } else res.status(404).json({ error: 'No encontrado' });
 });
@@ -146,6 +168,7 @@ client.on('message_create', async (message) => {
     if (!activeChats[chatId]) {
         activeChats[chatId] = { id: chatId, phone: normalizePhone(chatId), status: 'active', timestamp: Date.now(), botPaused: false, messages: [], labels: [] };
     }
+    appLog(`Mensaje recibido de ${normalizePhone(chatId)}: ${message.body}`, 'message');
     activeChats[chatId].lastMessage = message.body;
     activeChats[chatId].timestamp = Date.now();
     const msgObj = { body: message.body, fromMe: message.fromMe, timestamp: message.timestamp };
@@ -194,8 +217,9 @@ async function processBotResponse(chatId) {
                 const orderSummary = { id: orderData.eventId, customer: orderData.customer.name, items: orderData.items, timestamp: new Date().toISOString(), status: 'pending' };
                 ordersHistory.push(orderSummary);
                 io.emit('new-order', orderSummary);
-                if (await triggerWebhook(orderData)) { orderSummary.status = 'synced'; stats.erpSuccess++; } 
-                else { orderSummary.status = 'failed'; stats.erpErrors++; io.emit('erp-error', { chatId, orderId: orderData.eventId, message: 'Fallo al conectar con el ERP' }); }
+                appLog(`Nuevo pedido detectado: ${orderSummary.id}`, 'order');
+                if (await triggerWebhook(orderData)) { orderSummary.status = 'synced'; stats.erpSuccess++; appLog(`Pedido ${orderSummary.id} sincronizado con ERP`, 'success'); } 
+                else { orderSummary.status = 'failed'; stats.erpErrors++; io.emit('erp-error', { chatId, orderId: orderData.eventId, message: 'Fallo al conectar con el ERP' }); appLog(`Error al sincronizar ${orderSummary.id} con ERP`, 'error'); }
                 stats.ordersToday++;
                 io.emit('stats-update', stats);
                 activeChats[chatId].status = 'confirmed';
@@ -215,7 +239,11 @@ async function processBotResponse(chatId) {
         const finalMsg = replyText || "¡Perfecto! Tu pedido ha sido enviado a cocina. 🍔";
         chatHistories[chatId].push({ role: "model", parts: [{ text: aiResponse }] });
         await client.sendMessage(chatId, finalMsg);
-    } catch (e) { console.error('AI Error:', e); }
+        appLog(`Respuesta enviada a ${normalizePhone(chatId)}`, 'bot');
+    } catch (e) { 
+        console.error('AI Error:', e); 
+        appLog(`Error de IA: ${e.message}`, 'error');
+    }
     finally { io.emit('bot-typing', { chatId, active: false }); }
 }
 

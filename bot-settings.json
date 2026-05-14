@@ -1,5 +1,5 @@
 {
-  "botDelay": 5000,
+  "botDelay": 0,
   "botEnabled": true,
   "provider": "ollama",
   "model": "gemma4:e2b"
