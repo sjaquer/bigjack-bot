@@ -28,6 +28,7 @@ export default function App() {
   const [activeTimers, setActiveTimers] = useState({}); 
   const [remainingTime, setRemainingTime] = useState(0);
   const [alerts, setAlerts] = useState([]);
+  const [botTyping, setBotTyping] = useState({});
 
   const messagesEndRef = useRef(null);
 
@@ -50,6 +51,10 @@ export default function App() {
 
     socket.on('timer-update', (data) => {
       setActiveTimers(prev => ({ ...prev, [data.chatId]: { active: data.active, expiresAt: data.expiresAt } }));
+    });
+
+    socket.on('bot-typing', (data) => {
+        setBotTyping(prev => ({ ...prev, [data.chatId]: data.active }));
     });
 
     socket.on('erp-error', (err) => {
@@ -366,6 +371,15 @@ export default function App() {
                         {activeChat?.messages?.map((msg, i) => (
                             <div key={i} className={`msg ${msg.fromMe ? 'out' : 'in'}`}>{msg.body || "📍 Media"}</div>
                         ))}
+                        
+                        {botTyping[activeChatId] && (
+                            <div className="msg in typing-msg">
+                                <div className="typing-dots">
+                                    <span></span><span></span><span></span>
+                                </div>
+                            </div>
+                        )}
+
                         <div ref={messagesEndRef} />
                         </div>
                         {activeChat && (
@@ -396,7 +410,19 @@ export default function App() {
                     <div className="scroll-area" style={{padding: '35px'}}>
                         <div className="mini-card" style={{marginBottom: 30, maxWidth: '600px'}}>
                             <label style={{display:'flex', alignItems:'center', gap:10, marginBottom:15, fontWeight:'800'}}><Clock size={20} /> Delay de Respuesta</label>
-                            <input type="range" min="0" max="10000" step="500" value={botDelay} onChange={e=>updateSettings(null, null, e.target.value)} style={{width:'100%'}} />
+                            <input 
+                                type="range" 
+                                min="0" 
+                                max="10000" 
+                                step="500" 
+                                value={botDelay} 
+                                onChange={e => {
+                                    const val = parseInt(e.target.value);
+                                    setBotDelay(val);
+                                    updateSettings(null, null, val);
+                                }} 
+                                style={{width:'100%'}} 
+                            />
                             <div style={{textAlign:'right', fontWeight:'bold'}}>{(botDelay/1000).toFixed(1)}s</div>
                         </div>
                         <div className="mini-card" style={{maxWidth: '600px'}}>
