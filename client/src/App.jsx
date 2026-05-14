@@ -59,10 +59,22 @@ export default function App() {
     });
     
     socket.on('chat-update', (chat) => {
-      setChats(prev => ({
-        ...prev,
-        [chat.id]: { ...(prev[chat.id] || { messages: [] }), ...chat }
-      }));
+      setChats(prev => {
+        const existing = prev[chat.id] || { messages: [] };
+        // Si el chat del servidor trae mensajes (cache), usarlos si no tenemos nada
+        const mergedMessages = [...existing.messages];
+        if (chat.messages && chat.messages.length > 0) {
+            chat.messages.forEach(m => {
+                const exists = mergedMessages.some(em => em.timestamp === m.timestamp && em.body === m.body);
+                if (!exists) mergedMessages.push(m);
+            });
+            mergedMessages.sort((a,b) => a.timestamp - b.timestamp);
+        }
+        return {
+          ...prev,
+          [chat.id]: { ...existing, ...chat, messages: mergedMessages }
+        };
+      });
     });
 
     socket.on('new-message', (msg) => {
@@ -72,7 +84,13 @@ export default function App() {
         if (alreadyExists) return prev;
         return {
           ...prev,
-          [msg.chatId]: { ...chat, messages: [...chat.messages, msg], lastMessage: msg.body, timestamp: Date.now(), hasNew: msg.chatId !== activeChatId }
+          [msg.chatId]: { 
+            ...chat, 
+            messages: [...chat.messages, msg], 
+            lastMessage: msg.body, 
+            timestamp: Date.now(), 
+            hasNew: msg.chatId !== activeChatId 
+          }
         };
       });
     });
@@ -130,7 +148,7 @@ export default function App() {
     try {
       const res = await axios.get(`${SERVER_URL}/api/chats`);
       const chatsMap = {};
-      res.data.forEach(c => chatsMap[c.id] = { ...c, messages: [] });
+      res.data.forEach(c => chatsMap[c.id] = { ...c, messages: c.messages || [] });
       setChats(chatsMap);
     } catch (e) { }
   };
@@ -153,7 +171,7 @@ export default function App() {
     if (!inputValue.trim() || !activeChatId) return;
     const msgText = inputValue.trim();
     setInputValue('');
-    const optimisticMsg = { body: msgText, fromMe: true, timestamp: Date.now() };
+    const optimisticMsg = { body: msgText, fromMe: true, timestamp: Math.floor(Date.now()/1000) };
     setChats(prev => {
       const chat = prev[activeChatId];
       return { ...prev, [activeChatId]: { ...chat, messages: [...chat.messages, optimisticMsg], lastMessage: msgText } };
@@ -182,10 +200,35 @@ export default function App() {
   };
 
   const updateSettings = async (p, m, d) => {
-    await axios.post(`${SERVER_URL}/api/settings`, { provider: p || currentProvider, model: m || currentModel, delay: d !== undefined ? d : botDelay });
-    if (p) setCurrentProvider(p);
-    if (m) setCurrentModel(m);
-    if (d !== undefined) setBotDelay(d);
+    // Usamos los valores actuales si los nuevos son null/undefined
+    const finalProvider = p || currentProvider;
+    const finalModel = m || currentModel;
+    const finalDelay = d !== undefined ? d : botDelay;
+
+    try {
+        await axios.post(`${SERVER_URL}/api/settings`, { 
+            provider: finalProvider, 
+            model: finalModel, 
+            delay: finalDelay 
+        });
+        
+        // Actualizamos estado local
+        if (p) setCurrentProvider(p);
+        if (m) setCurrentModel(m);
+        if (d !== undefined) setBotDelay(d);
+    } catch (e) {
+        console.error('Error actualizando ajustes:', e);
+    }
+  };
+
+  const handleModelChange = (e) => {
+      const val = e.target.value; // Formato: "provider|model"
+      const parts = val.split('|');
+      if (parts.length >= 2) {
+          const provider = parts[0];
+          const model = parts.slice(1).join('|'); // En caso de que el modelo tenga | (raro, pero preventivo)
+          updateSettings(provider, model);
+      }
   };
 
   const logout = async () => {
@@ -200,7 +243,6 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* ALERTS OVERLAY */}
       <div className="alerts-container">
         {alerts.map(a => (
             <div key={a.id} className="toast error">
@@ -246,11 +288,6 @@ export default function App() {
                             {l.name}
                         </span>
                      ))}
-                     {activeTimers[chat.id]?.active && (
-                        <span className="timer-badge" style={{fontSize:'0.65rem', color:'var(--accent-orange)'}}>
-                            <Clock size={10} style={{display:'inline', marginRight:3}} /> IA Pendiente
-                        </span>
-                     )}
                   </div>
                 </div>
               ))}
@@ -364,8 +401,16 @@ export default function App() {
                         </div>
                         <div className="mini-card" style={{maxWidth: '600px'}}>
                             <label style={{display:'block', marginBottom:15, fontWeight:'800'}}>Modelo IA</label>
-                            <select value={`${currentProvider}:${currentModel}`} onChange={e=>updateSettings(e.target.value.split(':')[0], e.target.value.split(':')[1])} className="custom-select">
-                                {models.map(m => <option key={`${m.provider}:${m.name}`} value={`${m.provider}:${m.name}`}>{m.provider.toUpperCase()}: {m.name}</option>)}
+                            <select 
+                                value={`${currentProvider}|${currentModel}`} 
+                                onChange={handleModelChange} 
+                                className="custom-select"
+                            >
+                                {models.map(m => (
+                                    <option key={`${m.provider}|${m.name}`} value={`${m.provider}|${m.name}`}>
+                                        {m.provider.toUpperCase()}: {m.name}
+                                    </option>
+                                ))}
                             </select>
                         </div>
                     </div>
@@ -377,16 +422,8 @@ export default function App() {
         <aside className="info-panel">
           <h2>Actividad Hoy</h2>
           <div className="stat-grid">
-              <div className="mini-card">
-                  <span className="val">{stats.ordersToday}</span>
-                  <span className="lbl">Pedidos Totales</span>
-              </div>
-              <div className="mini-card">
-                  <span className="val" style={{color: stats.erpErrors > 0 ? 'var(--accent-red)' : 'var(--accent-teal)'}}>
-                      {stats.erpSuccess} / <small style={{fontSize:'1rem'}}>{stats.erpErrors}</small>
-                  </span>
-                  <span className="lbl">Sincronizados / Error</span>
-              </div>
+              <div className="mini-card"><span className="val">{stats.ordersToday}</span><span className="lbl">Pedidos</span></div>
+              <div className="mini-card"><span className="val">{stats.erpSuccess} / {stats.erpErrors}</span><span className="lbl">Sync / Fallos</span></div>
           </div>
           <div className="orders-section" style={{marginTop: 40}}>
               <h3>Últimos Pedidos</h3>

@@ -43,21 +43,17 @@ const activeChats = {};
 const stats = { ordersToday: 0, messagesProcessed: 0, erpSuccess: 0, erpErrors: 0 };
 let botStatus = 'starting';
 
+// Gestor de temporizadores (Debounce)
+const botTimers = {};
+
 // Determinar si esta instancia es la "Elegida" para un chat específico
 function isInstanceEligible(chatId) {
     const total = config.multiInstance.totalInstances;
-    if (total <= 1) return true; // Si hay solo uno, siempre es elegible
-
-    // Extraer solo números del ID de chat
-    const phoneNum = parseInt(chatId.replace(/\D/g, '').slice(-4)); // Usamos los últimos 4 dígitos para el reparto
+    if (total <= 1) return true;
+    const phoneNum = parseInt(chatId.replace(/\D/g, '').slice(-4)) || 0;
     const rank = config.multiInstance.instanceRank;
-    
-    // Algoritmo de reparto equitativo
     return (phoneNum % total) === rank;
 }
-
-// Gestor de temporizadores (Debounce)
-const botTimers = {};
 
 // API Endpoints
 app.get('/api/status', (req, res) => {
@@ -162,41 +158,49 @@ client.on('message_create', async (message) => {
     if (message.from.includes('@g.us') || message.from === 'status@broadcast') return;
     const chatId = message.fromMe ? message.to : message.from;
     
-    if (message.fromMe) {
-         io.emit('new-message', { chatId, body: message.body, fromMe: true, timestamp: message.timestamp });
-         return;
-    }
-
-    // Obtener información extendida del chat (Labels)
-    const chat = await message.getChat();
-    let labels = [];
-    try {
-        const rawLabels = await chat.getLabels();
-        labels = rawLabels.map(l => ({ name: l.name, hexColor: l.hexColor }));
-    } catch (e) { /* No Business Account */ }
-
+    // Inicialización INMEDIATA del registro de chat para evitar perder el primer mensaje
     if (!activeChats[chatId]) {
-        activeChats[chatId] = { id: chatId, phone: normalizePhone(chatId), status: 'active', timestamp: Date.now(), botPaused: false };
+        activeChats[chatId] = { 
+            id: chatId, 
+            phone: normalizePhone(chatId), 
+            status: 'active', 
+            timestamp: Date.now(), 
+            botPaused: false,
+            messages: [],
+            labels: []
+        };
     }
     activeChats[chatId].lastMessage = message.body;
     activeChats[chatId].timestamp = Date.now();
-    activeChats[chatId].labels = labels;
-    
+
+    // Guardar en pequeña caché local para persistencia al refrescar
+    const msgObj = { body: message.body, fromMe: message.fromMe, timestamp: message.timestamp };
+    activeChats[chatId].messages.push(msgObj);
+    if (activeChats[chatId].messages.length > 5) activeChats[chatId].messages.shift();
+
+    // Notificar UI de inmediato
     io.emit('chat-update', activeChats[chatId]);
-    io.emit('new-message', { chatId, body: message.body, fromMe: false, timestamp: message.timestamp });
+    io.emit('new-message', { chatId, ...msgObj });
+
+    if (message.fromMe) return;
+
+    // Obtener etiquetas (Labels) en segundo plano para no bloquear
+    message.getChat().then(chat => {
+        chat.getLabels().then(rawLabels => {
+            const labels = rawLabels.map(l => ({ name: l.name, hexColor: l.hexColor }));
+            activeChats[chatId].labels = labels;
+            io.emit('chat-update', activeChats[chatId]);
+        }).catch(() => {});
+    }).catch(() => {});
 
     if (!chatHistories[chatId]) chatHistories[chatId] = [];
     chatHistories[chatId].push({ role: "user", parts: [{ text: message.body }] });
 
     if (!botEnabled || activeChats[chatId].botPaused) return;
 
-    // --- PROCESO DE IDONEIDAD (Multi-Instancia) ---
-    if (!isInstanceEligible(chatId)) {
-        console.log(`[Multi-Bot] Chat ${chatId} ignorado por esta instancia (No es mi turno).`);
-        return;
-    }
+    // Multi-Instancia: Solo responde el bot idóneo
+    if (!isInstanceEligible(chatId)) return;
 
-    // Reiniciar Debounce y notificar a UI
     if (botTimers[chatId]) clearTimeout(botTimers[chatId]);
     io.emit('timer-update', { chatId, active: true, duration: botDelay, expiresAt: Date.now() + botDelay });
     botTimers[chatId] = setTimeout(() => processBotResponse(chatId), botDelay);
@@ -211,7 +215,7 @@ async function processBotResponse(chatId) {
         await chat.sendStateTyping();
 
         const prompt = getDynamicPrompt(aiProvider.provider);
-        const aiResponse = await aiProvider.sendMessage(chatHistories[chatId], "", prompt);
+        const aiResponse = await aiProvider.sendMessage(chatHistories[chatId], prompt);
 
         const orderMatchGemini = aiResponse.match(/<ORDER_JSON>([\s\S]*?)<\/ORDER_JSON>/);
         const orderMatchLocal = aiResponse.match(/###DATA###([\s\S]*?)###DATA###/);
@@ -222,35 +226,18 @@ async function processBotResponse(chatId) {
             try {
                 const rawOrderData = JSON.parse(orderDataRaw.trim());
                 const orderData = buildErpPayload(rawOrderData, { from: chatId });
-                
-                const orderSummary = { 
-                    id: orderData.eventId, 
-                    customer: orderData.customer.name, 
-                    items: orderData.items, 
-                    timestamp: new Date().toISOString(),
-                    status: 'pending' 
-                };
+                const orderSummary = { id: orderData.eventId, customer: orderData.customer.name, items: orderData.items, timestamp: new Date().toISOString(), status: 'pending' };
                 ordersHistory.push(orderSummary);
                 io.emit('new-order', orderSummary);
-
-                // Intento de Webhook con ERP
                 const erpSuccess = await triggerWebhook(orderData);
-                if (erpSuccess) {
-                    orderSummary.status = 'synced';
-                    stats.erpSuccess++;
-                } else {
-                    orderSummary.status = 'failed';
-                    stats.erpErrors++;
-                    io.emit('erp-error', { chatId, orderId: orderData.eventId, message: 'Fallo al conectar con el ERP' });
-                }
-                
+                if (erpSuccess) { orderSummary.status = 'synced'; stats.erpSuccess++; } 
+                else { orderSummary.status = 'failed'; stats.erpErrors++; io.emit('erp-error', { chatId, orderId: orderData.eventId, message: 'Fallo al conectar con el ERP' }); }
                 stats.ordersToday++;
                 io.emit('stats-update', stats);
                 activeChats[chatId].status = 'confirmed';
                 io.emit('chat-update', activeChats[chatId]);
                 io.emit('order-update', orderSummary);
-
-            } catch (e) { console.error('JSON Error:', e.message); }
+            } catch (e) { }
         }
 
         replyText = replyText.replace(/<ORDER_JSON>[\s\S]*?<\/ORDER_JSON>/gi, '')
@@ -260,8 +247,6 @@ async function processBotResponse(chatId) {
 
         const finalMsg = replyText || "¡Perfecto! Tu pedido ha sido enviado a cocina. 🍔";
         chatHistories[chatId].push({ role: "model", parts: [{ text: aiResponse }] });
-        
-        io.emit('new-message', { chatId, body: finalMsg, fromMe: true, timestamp: Math.floor(Date.now()/1000) });
         await client.sendMessage(chatId, finalMsg);
     } catch (e) { console.error('AI Error:', e); }
 }
@@ -281,13 +266,8 @@ function buildErpPayload(raw, message) {
 
 async function triggerWebhook(data) {
     if (!config.erp.webhookUrl) return false;
-    try { 
-        await axios.post(config.erp.webhookUrl, data, { timeout: config.erp.timeout }); 
-        return true;
-    } catch (e) { 
-        console.error('Webhook Error:', e.message);
-        return false;
-    }
+    try { await axios.post(config.erp.webhookUrl, data, { timeout: config.erp.timeout }); return true; } 
+    catch (e) { return false; }
 }
 
 client.initialize();
