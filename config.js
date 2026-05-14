@@ -32,6 +32,12 @@ const config = {
     app: {
         env: process.env.NODE_ENV || 'development',
         logLevel: process.env.LOG_LEVEL || 'info'
+    },
+    // Configuración para Multi-Instancia (Reparto de Chats)
+    multiInstance: {
+        instanceId: process.env.INSTANCE_ID || `BOT-${Math.floor(Math.random() * 1000)}`,
+        instanceRank: parseInt(process.env.INSTANCE_RANK || "0"), // 0, 1, 2, 3...
+        totalInstances: parseInt(process.env.TOTAL_INSTANCES || "1")
     }
 };
 

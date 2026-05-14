@@ -10,10 +10,10 @@ let mainWindow;
 
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 480,
-        height: 750,
-        minWidth: 400,
-        minHeight: 600,
+        width: 1280,
+        height: 800,
+        minWidth: 1024,
+        minHeight: 768,
         title: 'Big Jack Bot | Control Center',
         icon: path.join(__dirname, 'public/icon.png'),
         webPreferences: {
@@ -22,8 +22,8 @@ function createWindow() {
         }
     });
 
-    // En desarrollo usamos el servidor local, en producción también (ya que el backend corre interno)
     mainWindow.loadURL('http://localhost:3000');
+    mainWindow.maximize();
 
     // Desactivar menú para look de aplicación limpia
     Menu.setApplicationMenu(null);
